@@ -148,6 +148,11 @@ class Moment extends EnumBase {
         "Episode : Echoes"
     );
 
+    static EPISODE_REVENANT = new Moment(
+        "EPISODE_REVENANT",
+        "Episode : Revenant"
+    );
+
     constructor(type, label = undefined) {
         super(type, undefined, label);
     }
@@ -283,6 +288,10 @@ class Moment extends EnumBase {
 
         if (this == Moment.EPISODE_ECHOES) {
             return new Date(Date.UTC(2024, 5, 4, 17, 0, 0));
+        }
+
+        if (this == Moment.EPISODE_REVENANT) {
+            return new Date(Date.UTC(2024, 9, 8, 17, 0, 0));
         }
 
         return undefined;

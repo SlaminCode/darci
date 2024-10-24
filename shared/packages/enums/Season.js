@@ -172,6 +172,13 @@ class Season extends EnumBase {
         Moment.NOW
     );
 
+    static EPISODE_REVENANT = new Season(
+        Moment.EPISODE_REVENANT.type,
+        Moment.EPISODE_REVENANT.label,
+        Moment.EPISODE_REVENANT,
+        Moment.NOW
+    );
+
     static UNKNOWN = new Season("unknown", "Unknown");
 
     constructor(type, label, startMoment, endMoment) {
