@@ -48,6 +48,7 @@ class ActivityStoreInterface {
     #select_player_activity_summary;
     #select_medals_summary;
     #select_latest_activity_id_for_member;
+    #select_summary_by_team;
 
     constructor(dbPath) {
         this.#dbPath = dbPath;
@@ -144,30 +145,30 @@ class ActivityStoreInterface {
         `);
 
         this.#select_character_activity_stats_for_activity = this.#db.prepare(`
-            SELECT
-                CAST(character.member as TEXT) as member_id,
-                CAST(character_activity_stats.character as TEXT) as character_id,
-                CAST(character_activity_stats.fireteam_id as TEXT) as fireteam_id,
-
-                assists, score, kills, deaths, completed, opponents_defeated, activity_duration_seconds,
-                standing, team, completion_reason, start_seconds, time_played_seconds, team_score,
-                precision_kills, weapon_kills_grenade, weapon_kills_melee, weapon_kills_super,
-                all_medals_earned, light_level, emblem_hash,
-
-                character_activity_stats.id as character_activity_stats_index,
-                
-                member.bungie_display_name as bungie_display_name,
-                member.bungie_display_name_code as bungie_display_name_code,
-                member.platform_id as platform_id,
-
-                character.class as class
-            FROM
-                character_activity_stats
-            INNER JOIN
-                character on character_activity_stats.character = character.character_id,
-                member on character.member = member.member_id
-            WHERE
-                activity = @activityId
+        SELECT
+        CAST(c.member AS TEXT) AS member_id,
+        CAST(cas.character AS TEXT) AS character_id,
+        CAST(cas.fireteam_id AS TEXT) AS fireteam_id,
+        cas.assists, cas.score, cas.kills, cas.deaths, cas.completed, 
+        cas.opponents_defeated, cas.activity_duration_seconds, cas.standing, 
+        cas.team, cas.completion_reason, cas.start_seconds, 
+        cas.time_played_seconds, cas.team_score, cas.precision_kills, 
+        cas.weapon_kills_grenade, cas.weapon_kills_melee, cas.weapon_kills_super,
+        cas.all_medals_earned, cas.light_level, cas.emblem_hash,
+        cas.id AS character_activity_stats_index,
+        m.bungie_display_name AS bungie_display_name,
+        m.bungie_display_name_code AS bungie_display_name_code,
+        m.platform_id AS platform_id,
+        c.class AS class
+    FROM
+        character_activity_stats cas
+    INNER JOIN
+        character c ON cas.character = c.character_id
+    INNER JOIN
+        member m ON c.member = m.member_id
+    WHERE
+        cas.activity = @activityId;
+    
         `);
 
         this.#select_version = this.#db.prepare(`
@@ -175,108 +176,143 @@ class ActivityStoreInterface {
         `);
 
         this.#select_meta_weapons_summary = this.#db.prepare(`
+        WITH RelevantActivities AS (
             SELECT
-                reference_id as id,
-                count(*) as count,
-                sum(weapon_result.precision_kills) as precision,
-                sum(weapon_result.kills) as kills
+                activity.activity_id,
+                character_activity_stats.fireteam_id
             FROM
-                weapon_result
-            INNER JOIN
-                character_activity_stats on 
-                weapon_result.character_activity_stats = character_activity_stats.id
+                character_activity_stats
+            INNER JOIN activity 
+                ON character_activity_stats.activity = activity.activity_id
+            INNER JOIN character 
+                ON character_activity_stats.character = character.character_id
+            INNER JOIN member 
+                ON character.member = member.member_id
             WHERE
-                activity in (
-                    SELECT
-                        activity.activity_id
-                    FROM
-                        character_activity_stats
-                    INNER JOIN
-                        activity ON character_activity_stats.activity = activity.activity_id,
-                        character on character_activity_stats.character = character.character_id,
-                        member on member.member_id = character.member
-                    WHERE
-                        member.member_id = @memberId AND
-                        (character.class = @characterSelectionId OR 4 = @characterSelectionId) AND
-                        period > @startDate AND
-                        period < @endDate AND
-                        exists (select 1 from modes where activity = activity.activity_id and mode = @modeId) AND
-                        not exists (select 1 from modes where activity = activity.activity_id and mode = @restrictModeId)
-                )
-            AND
-                fireteam_id not in (
-                    SELECT
-                        fireteam_id
-                    FROM
-                        character_activity_stats
-                    INNER JOIN
-                        activity ON character_activity_stats.activity = activity.activity_id,
-                        character on character_activity_stats.character = character.character_id,
-                        member on member.member_id = character.member
-                    WHERE
-                        member.member_id = @memberId AND
-                        (character.class = @characterSelectionId OR 4 = @characterSelectionId) AND
-                        period > @startDate AND
-                        period < @endDate AND
-                        exists (select 1 from modes where activity = activity.activity_id and mode = @modeId) AND
-                        not exists (select 1 from modes where activity = activity.activity_id and mode = @restrictModeId)
-            ) 
-            GROUP BY reference_id`);
+                member.member_id = @memberId 
+                AND (character.class = @characterSelectionId OR 4 = @characterSelectionId) 
+                AND period > @startDate 
+                AND period < @endDate 
+                AND EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @modeId) 
+                AND NOT EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @restrictModeId)
+        )
+        
+        SELECT
+            reference_id AS id,
+            COUNT(*) AS count,
+            SUM(weapon_result.precision_kills) AS precision,
+            SUM(weapon_result.kills) AS kills
+        FROM
+            weapon_result
+        INNER JOIN character_activity_stats 
+            ON weapon_result.character_activity_stats = character_activity_stats.id
+        WHERE
+            activity IN (SELECT activity_id FROM RelevantActivities)
+            AND fireteam_id NOT IN (SELECT fireteam_id FROM RelevantActivities)
+        GROUP BY 
+            reference_id;
+        `);
 
         this.#select_class_meta_summary = this.#db.prepare(`
+        WITH RelevantActivities AS (
+            SELECT DISTINCT
+                activity.activity_id,
+                character_activity_stats.fireteam_id
+            FROM 
+                character_activity_stats
+            INNER JOIN activity ON character_activity_stats.activity = activity.activity_id
+            INNER JOIN character ON character_activity_stats.character = character.character_id
+            INNER JOIN member ON member.member_id = character.member
+            WHERE
+                member.member_id = @memberId AND
+                (character.class = @characterSelectionId OR @characterSelectionId = 4) AND
+                period > @startDate AND
+                period < @endDate AND
+                EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @modeId) AND
+                NOT EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @restrictModeId)
+        )
+        
+        SELECT
+            character.class as classId,
+            COUNT(character.class) as count,
+            SUM(standing = 0) as wins,
+            SUM(kills) as kills,
+            SUM(deaths) as deaths,
+            SUM(assists) as assists,
+            SUM(opponents_defeated) as opponentsDefeated,
+            SUM(weapon_kills_grenade) as grenadeKills,
+            SUM(weapon_kills_super) as superKills,
+            SUM(weapon_kills_melee) as meleeKills
+        FROM
+            character_activity_stats
+        INNER JOIN character ON character_activity_stats.character = character.character_id
+        WHERE
+            activity IN (SELECT activity_id FROM RelevantActivities) AND
+            fireteam_id NOT IN (SELECT fireteam_id FROM RelevantActivities)
+        GROUP BY character.class;
+        
+        `);
+
+        this.#select_summary_by_team = this.#db.prepare(`
+        WITH MainPlayerActivities AS (
             SELECT
-                character.class as classId,
-				count(character.class) as count,
-                sum(standing = 0) as wins,
-                sum(kills) as kills,
-                sum(deaths) as deaths,
-                sum(assists) as assists,
-                sum(opponents_defeated) as opponentsDefeated,
-                sum(weapon_kills_grenade) as grenadeKills,
-                sum(weapon_kills_super) as superKills,
-                sum(weapon_kills_melee) as meleeKills
+                activity.activity_id,
+                character_activity_stats.team as player_team,
+                character.character_id as main_player_character_id
             FROM
                 character_activity_stats
             INNER JOIN
-                character on 
-                character_activity_stats.character = character.character_id
+                activity ON character_activity_stats.activity = activity.activity_id
+            INNER JOIN
+                character on character_activity_stats.character = character.character_id
+            INNER JOIN
+                member on member.member_id = character.member
             WHERE
-                activity in (
-                    SELECT
-                        activity.activity_id
-                    FROM
-                        character_activity_stats
-                    INNER JOIN
-                        activity ON character_activity_stats.activity = activity.activity_id,
-                        character on character_activity_stats.character = character.character_id,
-                        member on member.member_id = character.member
-                    WHERE
-                        member.member_id = @memberId AND
-                        (character.class = @characterSelectionId OR @characterSelectionId = 4) AND
-                        period > @startDate AND
-                        period < @endDate AND
-                        exists (select 1 from modes where activity = activity.activity_id and mode = @modeId) AND
-                        not exists (select 1 from modes where activity = activity.activity_id and mode = @restrictModeId)
-                )
-                AND
-                    fireteam_id not in (
-                        SELECT
-                            fireteam_id
-                        FROM
-                            character_activity_stats
-                        INNER JOIN
-                            activity ON character_activity_stats.activity = activity.activity_id,
-                            character on character_activity_stats.character = character.character_id,
-                            member on member.member_id = character.member
-                        WHERE
-                            member.member_id = @memberId AND
-                            (character.class = @characterSelectionId OR @characterSelectionId = 4) AND
-                            period > @startDate AND
-                            period < @endDate AND
-                            exists (select 1 from modes where activity = activity.activity_id and mode = @modeId) AND
-                            not exists (select 1 from modes where activity = activity.activity_id and mode = @restrictModeId)
-                ) 
-            GROUP BY class
+                member.member_id = @memberId AND
+                (character.class = @characterSelectionId OR @characterSelectionId = 4) AND
+                period > @startDate AND
+                period < @endDate AND
+                EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @modeId) AND
+                NOT EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @restrictModeId)
+        )
+        
+        SELECT
+            0 as TeamType,
+            COUNT(*) as totalPlayers,
+            sum(kills) as kills,
+            sum(deaths) as deaths,
+            sum(assists) as assists,
+            sum(weapon_kills_grenade) as grenadeKills,
+            sum(weapon_kills_super) as superKills,
+            sum(weapon_kills_melee) as meleeKills
+        FROM
+            character_activity_stats
+        INNER JOIN
+            character on character_activity_stats.character = character.character_id
+        WHERE
+            activity IN (SELECT activity_id FROM MainPlayerActivities)
+            AND team = (SELECT player_team FROM MainPlayerActivities WHERE character_activity_stats.activity = MainPlayerActivities.activity_id LIMIT 1)
+            AND character.character_id != (SELECT main_player_character_id FROM MainPlayerActivities LIMIT 1)
+        
+        UNION
+        
+        SELECT
+            1 as TeamType,
+            COUNT(*) as totalPlayers,
+            sum(kills) as kills,
+            sum(deaths) as deaths,
+            sum(assists) as assists,
+            sum(weapon_kills_grenade) as grenadeKills,
+            sum(weapon_kills_super) as superKills,
+            sum(weapon_kills_melee) as meleeKills
+        FROM
+            character_activity_stats
+        INNER JOIN
+            character on character_activity_stats.character = character.character_id
+        WHERE
+            activity IN (SELECT activity_id FROM MainPlayerActivities)
+            AND team != (SELECT player_team FROM MainPlayerActivities WHERE character_activity_stats.activity = MainPlayerActivities.activity_id LIMIT 1)
+        
         `);
 
         this.#select_map_summary = this.#db.prepare(`
@@ -370,85 +406,179 @@ class ActivityStoreInterface {
                 count DESC`);
 
         this.#select_medals_summary = this.#db.prepare(`
-            SELECT
-                medal_result.reference_id as id,
-                sum(count) as count
-            FROM
-                character_activity_stats
-            INNER JOIN
-                medal_result on character_activity_stats.id = medal_result.character_activity_stats,
-                activity ON character_activity_stats.activity = activity.activity_id,
-                character on character_activity_stats.character = character.character_id,
-                member on member.member_id = character.member
-            WHERE
-                member.member_id = @memberId AND
-                (character.class = @characterSelectionId OR 4 = @characterSelectionId) AND
-                period > @startDate AND
-                period < @endDate AND
-                exists (select 1 from modes where activity = activity.activity_id and mode = @modeId) AND
-                not exists (select 1 from modes where activity = activity.activity_id and mode = @restrictModeId) AND
-                medal_result.reference_id NOT IN ('precisionKills', 'weaponKillsAbility', 'weaponKillsGrenade', 'weaponKillsMelee', 'weaponKillsSuper', 'allMedalsEarned')
-            GROUP BY
-                medal_result.reference_id
-            ORDER BY
-                count DESC`);
+        SELECT
+            medal_result.reference_id as id,
+            sum(medal_result.count) as count
+        FROM
+            character_activity_stats
+        INNER JOIN medal_result 
+            ON character_activity_stats.id = medal_result.character_activity_stats
+        INNER JOIN activity 
+            ON character_activity_stats.activity = activity.activity_id
+        INNER JOIN character 
+            ON character_activity_stats.character = character.character_id
+        INNER JOIN member 
+            ON character.member = member.member_id
+        WHERE
+            member.member_id = @memberId AND
+            (character.class = @characterSelectionId OR @characterSelectionId = 4) AND
+            activity.period > @startDate AND
+            activity.period < @endDate AND
+            EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @modeId) AND
+            NOT EXISTS (SELECT 1 FROM modes WHERE activity = activity.activity_id AND mode = @restrictModeId) AND
+            medal_result.reference_id NOT IN ('precisionKills', 'weaponKillsAbility', 'weaponKillsGrenade', 'weaponKillsMelee', 'weaponKillsSuper', 'allMedalsEarned')
+        GROUP BY
+            medal_result.reference_id
+        ORDER BY
+            count DESC
 
+    `);
+
+        //includes longest streak
         this.#select_player_activity_summary = this.#db.prepare(`
+        WITH RankedMatches AS (
             SELECT
-                count(*) as activityCount,
-                COALESCE(sum(time_played_seconds),0) as timePlayedSeconds,
-                COALESCE(sum(character_activity_stats.standing = 0),0) as wins,
-                COALESCE(sum( character_activity_stats.completion_reason = 4),0) as completionReasonMercy,
-                COALESCE(sum(completed),0) as completed,
-                COALESCE(sum(assists),0) as assists,
-                COALESCE(sum(character_activity_stats.kills),0) as kills,
-                COALESCE(sum(deaths),0) as deaths,
-                COALESCE(sum(opponents_defeated),0) as opponentsDefeated,
-                COALESCE(sum(weapon_kills_grenade),0) as grenadeKills,
-                COALESCE(sum(weapon_kills_melee),0) as meleeKills,
-                COALESCE(sum(weapon_kills_super),0) as superKills,
-                COALESCE(sum(weapon_kills_ability),0) as abilityKills,
-                COALESCE(sum(character_activity_stats.precision_kills),0) as precision,
-                COALESCE(max(assists),0) as highestAssists,
-                COALESCE(max(score),0) as highestScore,
-                COALESCE(max(character_activity_stats.kills),0) as highestKills,
-                COALESCE(max(deaths),0) as highestDeaths,
-                COALESCE(max(opponents_defeated),0) as highestOpponentsDefeated,
-                COALESCE(max(weapon_kills_grenade),0) as highestGrenadeKills,
-                COALESCE(max(weapon_kills_melee),0) as highestMeleeKills,
-                COALESCE(max(weapon_kills_super),0) as highestSuperKills,
-                COALESCE(max(weapon_kills_ability),0) as highestAbilityKills,
-                COALESCE(max(
-                    cast(character_activity_stats.kills as real) 
-                    / 
-                    cast(
-                        IFNULL(
-                            NULLIF(character_activity_stats.deaths, 0), 
-                        1) as real
-                    )),0.0)
-                as highestKillsDeathsRatio,
-                COALESCE(max(
-                    cast((character_activity_stats.kills + character_activity_stats.assists) as real) 
-                    / 
-                    cast(
-                        IFNULL(
-                            NULLIF(character_activity_stats.deaths, 0), 
-                        1) as real
-                    )),0.0)
-                as highestEfficiency
-            FROM
-                character_activity_stats
-            INNER JOIN
-                activity ON character_activity_stats.activity = activity.activity_id,
-                character on character_activity_stats.character = character.character_id,
-                member on member.member_id = character.member
-            WHERE
-                member.member_id = @memberId AND
-                (character.class = @characterSelectionId OR 4 = @characterSelectionId) AND
-                period > @startDate AND
-                period < @endDate AND
-                exists (select 1 from modes where activity = activity.activity_id and mode = @modeId) AND
-                not exists (select 1 from modes where activity = activity.activity_id and mode = @restrictModeId)`);
+                cas.character,
+                cas.standing,
+                CASE WHEN cas.standing = 0 THEN 1 ELSE 0 END AS is_win,
+                CASE WHEN cas.standing != 0 THEN 1 ELSE 0 END AS is_loss,
+                ROW_NUMBER() OVER(PARTITION BY cas.character ORDER BY a.period) - 
+                    ROW_NUMBER() OVER(PARTITION BY cas.character, cas.standing ORDER BY a.period) AS streak_group
+            FROM character_activity_stats cas
+            INNER JOIN activity a ON cas.activity = a.activity_id
+            INNER JOIN character c ON cas.character = c.character_id
+            INNER JOIN member m ON c.member = m.member_id
+            WHERE 
+                m.member_id = @memberId AND
+                (c.class = @characterSelectionId OR 4 = @characterSelectionId) AND
+                a.period BETWEEN @startDate AND @endDate AND
+                EXISTS (
+                    SELECT 1 
+                    FROM modes 
+                    WHERE activity = a.activity_id AND mode = @modeId
+                ) AND
+                NOT EXISTS (
+                    SELECT 1 
+                    FROM modes 
+                    WHERE activity = a.activity_id AND mode = @restrictModeId
+                )
+        ),
+        StreakCounts AS (
+            SELECT
+                character,
+                standing,
+                streak_group,
+                COUNT(*) AS streak_length
+            FROM RankedMatches
+            GROUP BY character, standing, streak_group
+        ),
+        StreakMax AS (
+            SELECT
+                character,
+                MAX(CASE WHEN standing = 0 THEN streak_length ELSE 0 END) AS longest_win_streak,
+                MAX(CASE WHEN standing != 0 THEN streak_length ELSE 0 END) AS longest_loss_streak
+            FROM StreakCounts
+            GROUP BY character
+        )
+        SELECT
+            count(*) as activityCount,
+            COALESCE(sum(time_played_seconds),0) as timePlayedSeconds,
+            COALESCE(sum(CASE WHEN character_activity_stats.standing = 0 THEN 1 ELSE 0 END),0) as wins,
+            COALESCE(sum(CASE WHEN character_activity_stats.completion_reason = 4 THEN 1 ELSE 0 END),0) as completionReasonMercy,
+            COALESCE(sum(CASE WHEN character_activity_stats.completion_reason = 0 THEN 1 ELSE 0 END),0) as completionReasonObjectiveCompleted,
+            COALESCE(sum(CASE WHEN character_activity_stats.completion_reason = 1 THEN 1 ELSE 0 END),0) as completionReasonTimeExpired,
+            COALESCE(sum(completed),0) as completed,
+            COALESCE(sum(assists),0) as assists,
+            COALESCE(sum(character_activity_stats.kills),0) as kills,
+            COALESCE(sum(deaths),0) as deaths,
+            COALESCE(sum(opponents_defeated),0) as opponentsDefeated,
+            COALESCE(sum(weapon_kills_grenade),0) as grenadeKills,
+            COALESCE(sum(weapon_kills_melee),0) as meleeKills,
+            COALESCE(sum(weapon_kills_super),0) as superKills,
+            COALESCE(sum(weapon_kills_ability),0) as abilityKills,
+            COALESCE(sum(character_activity_stats.precision_kills),0) as precision,
+            COALESCE(max(assists),0) as highestAssists,
+            COALESCE(max(score),0) as highestScore,
+            COALESCE(max(character_activity_stats.kills),0) as highestKills,
+            COALESCE(max(deaths),0) as highestDeaths,
+            COALESCE(max(opponents_defeated),0) as highestOpponentsDefeated,
+            COALESCE(max(weapon_kills_grenade),0) as highestGrenadeKills,
+            COALESCE(max(weapon_kills_melee),0) as highestMeleeKills,
+            COALESCE(max(weapon_kills_super),0) as highestSuperKills,
+            COALESCE(max(weapon_kills_ability),0) as highestAbilityKills,
+            COALESCE(max(
+                cast(character_activity_stats.kills as real) 
+                / 
+                cast(
+                    IFNULL(
+                        NULLIF(character_activity_stats.deaths, 0), 
+                    1) as real
+                )
+            ),0.0) as highestKillsDeathsRatio,
+            COALESCE(max(
+                cast((character_activity_stats.kills + character_activity_stats.assists) as real) 
+                / 
+                cast(
+                    IFNULL(
+                        NULLIF(character_activity_stats.deaths, 0), 
+                    1) as real
+                )
+            ),0.0) as highestEfficiency,
+            COALESCE(MAX(longest_win_streak), 0) AS maxWinStreak,
+            COALESCE(MAX(longest_loss_streak), 0) AS maxLossStreak
+        FROM character_activity_stats
+        INNER JOIN activity ON character_activity_stats.activity = activity.activity_id
+        INNER JOIN character ON character_activity_stats.character = character.character_id
+        INNER JOIN member ON member.member_id = character.member
+        LEFT JOIN StreakMax ON character_activity_stats.character = StreakMax.character
+        WHERE
+            member.member_id = @memberId AND
+            (character.class = @characterSelectionId OR 4 = @characterSelectionId) AND
+            activity.period BETWEEN @startDate AND @endDate AND
+            EXISTS (
+                SELECT 1 
+                FROM modes 
+                WHERE activity = activity.activity_id AND mode = @modeId
+            ) AND
+            NOT EXISTS (
+                SELECT 1 
+                FROM modes 
+                WHERE activity = activity.activity_id AND mode = @restrictModeId
+            )
+        `);
+    }
+
+    retrieveTeamSummary(
+        memberId,
+        characterSelection,
+        mode,
+        startDate,
+        endDate
+    ) {
+        let restrictModeId = this.getRestrictModeId(mode);
+
+        //todo: should this be get not all?
+        let teamSummary = this.#select_summary_by_team.all({
+            memberId,
+            restrictModeId,
+            characterSelectionId: characterSelection.id,
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+            modeId: mode.id,
+        });
+
+        let out = {};
+
+        //out.playerTeam = teamSummary[0];
+
+        if (teamSummary[1].totalPlayers == 0) {
+            out.opponentTeam = teamSummary[0];
+        } else {
+            out.playerTeam = teamSummary[0];
+            out.opponentTeam = teamSummary[1];
+        }
+
+        return out;
     }
 
     retrieveCharacterClassMetaSummary(
@@ -1041,13 +1171,11 @@ class ActivityStoreInterface {
     }
 
     getRestrictModeId(mode) {
-        let restrictModeId = -1;
-
         if (mode.isPrivate()) {
-            restrictModeId === Mode.PRIVATE_MATCHES_ALL.id;
+            return -1;
         }
 
-        return restrictModeId;
+        return Mode.PRIVATE_MATCHES_ALL.id;
     }
 }
 

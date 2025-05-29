@@ -36,6 +36,7 @@ const moments = [
     Moment.MONTH,
     CURRENT_SEASON.startMoment,
     Moment.NOW,
+    Moment.ALL_TIME,
 ];
 
 const MomentSelect = (props) => {

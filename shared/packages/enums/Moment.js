@@ -43,7 +43,9 @@ class Moment extends EnumBase {
     //static NEXT_MONTH = new Moment("NextMonth");
     static ALL_TIME = new Moment("AllTime", "All Time");
     //static CUSTOM = new Moment("Custom");
+
     static LAUNCH = new Moment("Launch", "Destiny 2 Launch");
+
     static RED_WAR = new Moment("RedWar", "Red War");
     static CURSE_OF_OSIRIS = new Moment("CurseOfOsiris", "Curse of Osiris");
     static WARMIND = new Moment("Warmind");
@@ -129,6 +131,21 @@ class Moment extends EnumBase {
     static SEASON_OF_THE_WITCH = new Moment(
         "SeasonOfTheWitch",
         "Season of the Witch"
+    );
+
+    static SEASON_OF_THE_WISH = new Moment(
+        "SeasonOfTheWish",
+        "Season of the Wish"
+    );
+
+    static THE_FINAL_SHAPE = new Moment(
+        "TheFinalShape",
+        "The Final Shape"
+    );
+
+    static EPISODE_ECHOES = new Moment(
+        "EpisodeEchoes",
+        "Episode : Echoes"
     );
 
     constructor(type, label = undefined) {
@@ -254,6 +271,18 @@ class Moment extends EnumBase {
 
         if (this == Moment.SEASON_OF_THE_WITCH) {
             return new Date(Date.UTC(2023, 7, 22, 17, 0, 0));
+        }
+
+        if (this == Moment.SEASON_OF_THE_WISH) {
+            return new Date(Date.UTC(2023, 10, 28, 17, 0, 0));
+        }
+
+        if (this == Moment.THE_FINAL_SHAPE) {
+            return new Date(Date.UTC(2024, 5, 4, 17, 0, 0));
+        }
+
+        if (this == Moment.EPISODE_ECHOES) {
+            return new Date(Date.UTC(2024, 5, 4, 17, 0, 0));
         }
 
         return undefined;

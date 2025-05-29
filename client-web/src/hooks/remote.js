@@ -358,6 +358,7 @@ export const useFetchPlayerSummary = (args) => {
                 );
 
                 const as = PlayerSummary.fromApi(data, manifest);
+
                 s = reducer(s, "activityStats", as);
 
                 //clear any previous errors
@@ -613,7 +614,7 @@ export const useFetchPlayerProfile = (
             const rnd = new Date().getTime();
             try {
                 const data = await fetchDestinyApi(
-                    `https://www.bungie.net/Platform/Destiny2/${platformId}/Profile/${memberId}/?components=200,202,204,1000&rnd=${rnd}`
+                    `https://www.bungie.net/Platform/Destiny2/${platformId}/Profile/${memberId}/?components=200,202,204,1000,1100&rnd=${rnd}`
                 );
 
                 let profile = new PlayerProfile(data, manifest);
